@@ -1,100 +1,99 @@
-import os
-from typing import List, Literal
+from typing import Any, Callable, List, Literal
 
+import yaml
+from langchain.agents.agent import AgentExecutor
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
-from langchain_openai.chat_models import ChatOpenAI
+from langchain_groq import ChatGroq
+from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import create_react_agent
-from langgraph.types import Command
-from typing_extensions import TypedDict
 
-from tools import add, arxiv_search, div, internet_search, mod, mult, sub, wiki_search
-
-llm = ChatOpenAI(model="gpt-4.1-mini", api_key=os.getenv("OPENAI_API_KEY"))
-
-
-class State(MessagesState):
-    next: str
-
-
-def create_supervisor_node(
-    members: List[str],
-) -> Command[Literal["math", "web_search", "__end__"]]:
-    options = ["FINISH"] + members
-
-    class Router(TypedDict):
-        next: Literal[*options]
-
-    def supervisor_node(
-        state: State,
-    ) -> Command[Literal["math", "web_search", "__end__"]]:
-        prompt = f"""
-        You are a supervisor tasked with managing a conversation between the 
-        following workers: {members}. Given the following user request, respond with the worker to act next. 
-        Each worker will perform a task and respond with their results and status. When finished, respond with FINISH.
-
-        Guidelines:
-            - The final answer must be either a number, a single string, or a comma-separated list of numbers or strings.
-            - Do not include units (e.g. %, $, km) or commas inside numbers unless explicitly requested.
-            - If you use abbreviations in strings, write out the full expression in parentheses the first time the word appears.
-            - Write digits in full words only if asked.
-        """
-
-        messages = [{"role": "system", "content": prompt}] + state["messages"]
-
-        response = llm.with_structured_output(Router).invoke(messages)
-
-        goto = response["next"]
-        if goto == "FINISH":
-            goto = END
-
-        return Command(goto=goto, update={"next": goto})
-
-    return supervisor_node
+from tools import (
+    add,
+    arxiv_search,
+    create_handoff_tool,
+    div,
+    internet_search,
+    mod,
+    mult,
+    retriever_tool,
+    sub,
+    wiki_search,
+)
+from utils import pretty_print_messages
 
 
-def math_node(state: State) -> Command[Literal["supervisor"]]:
-    math_agent = create_react_agent(model=llm, tools=[add, sub, mult, div, mod])
+def load_prompt(name: str) -> str:
+    with open("prompts.yaml", "r") as f:
+        prompts = yaml.safe_load(f)
+    return prompts[name]
 
-    result = math_agent.invoke(state)
 
-    return Command(
-        update={
-            "messages": [
-                HumanMessage(content=result["messages"][-1].content, name="math")
-            ]
-        },
-        goto="supervisor",
+def create_llm(model: Literal["groq", "openai"] = "openai") -> BaseChatModel:
+    return (
+        ChatGroq(model="qwen-qwq-32b", temperature=0)
+        if model == "groq"
+        else ChatOpenAI(model="gpt-4.1", temperature=0)
     )
 
 
-def web_search_node(state: State) -> Command[Literal["supervisor"]]:
-    search_agent = create_react_agent(
-        model=llm, tools=[internet_search, wiki_search, arxiv_search]
-    )
-
-    result = search_agent.invoke(state)
-
-    return Command(
-        update={
-            "messages": [
-                HumanMessage(content=result["messages"][-1].content, name="web_search")
-            ]
-        },
-        goto="supervisor",
+def create_agent(
+    llm: BaseChatModel, tools: List[Any], prompt_name: str, name: str
+) -> AgentExecutor:
+    return create_react_agent(
+        model=llm, tools=tools, prompt=load_prompt(prompt_name), name=name
     )
 
 
-def build_worflow() -> StateGraph:
-    workflow = StateGraph(State)
+def create_supervisor_agent(llm: BaseChatModel) -> AgentExecutor:
+    assign_to_research_agent = create_handoff_tool(
+        agent_name="research_agent",
+        description="Assign task to a researcher agent.",
+    )
+
+    assign_to_math_agent = create_handoff_tool(
+        agent_name="math_agent",
+        description="Assign task to a math agent.",
+    )
+
+    return create_agent(
+        llm=llm,
+        tools=[assign_to_research_agent, assign_to_math_agent],
+        prompt_name="supervisor_prompt",
+        name="supervisor",
+    )
+
+
+def create_workflow() -> Callable:
+    llm = create_llm()
+
+    research_agent = create_agent(
+        llm=llm,
+        tools=[retriever_tool, internet_search, wiki_search, arxiv_search],
+        prompt_name="web_research_prompt",
+        name="research_agent",
+    )
+
+    math_agent = create_agent(
+        llm=llm,
+        tools=[add, sub, mult, div, mod],
+        prompt_name="math_prompt",
+        name="math_agent",
+    )
+
+    supervisor_agent = create_supervisor_agent(llm)
+
+    workflow = StateGraph(MessagesState)
 
     workflow.add_node(
-        "supervisor", create_supervisor_node(members=["math", "web_search"])
+        supervisor_agent, destinations=("research_agent", "math_agent", END)
     )
-    workflow.add_node("math", math_node)
-    workflow.add_node("web_search", web_search_node)
-
+    workflow.add_node(research_agent)
+    workflow.add_node(math_agent)
     workflow.add_edge(START, "supervisor")
+    workflow.add_edge("research_agent", "supervisor")
+    workflow.add_edge("math_agent", "supervisor")
 
     return workflow.compile()
 
@@ -102,12 +101,19 @@ def build_worflow() -> StateGraph:
 class BasicAgent:
     def __init__(self) -> None:
         print("BasicAgent initialized.")
-        self.graph = build_worflow()
+        self.graph = create_workflow()
 
     def __call__(self, question: str) -> str:
-        print(f"Agent received the question: {question[:50]}...")
+        print(f"Agent received question (first 50 chars): {question[:50]}...")
 
-        messages = [HumanMessage(content=question)]
-        messages = self.graph.invoke({"messages": messages})
+        initial_messages = [HumanMessage(content=question)]
+        final_messages = None
 
-        return messages["messages"][-1].content
+        for chunk in self.graph.stream({"messages": initial_messages}):
+            pretty_print_messages(chunk)
+            final_messages = chunk
+
+        if final_messages is None:
+            raise RuntimeError("No messages were generated during processing")
+
+        return final_messages["supervisor"]["messages"][-1].content
