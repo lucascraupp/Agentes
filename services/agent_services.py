@@ -30,12 +30,16 @@ def load_prompt(name: str) -> str:
     return prompts[name]
 
 
-def create_llm(model: Literal["groq", "openai"] = "openai") -> BaseChatModel:
-    return (
-        ChatGroq(model="qwen-qwq-32b", temperature=0)
-        if model == "groq"
-        else ChatOpenAI(model="gpt-4.1", temperature=0)
-    )
+def create_llm(
+    model: Literal["groq", "openai", "openai-nano"] = "openai",
+) -> BaseChatModel:
+    match (model):
+        case "groq":
+            return ChatGroq(model="qwen-qwq-32b", temperature=0)
+        case "openai":
+            return ChatOpenAI(model="gpt-4.1", temperature=0)
+        case "openai-nano":
+            return ChatOpenAI(model="gpt-4.1-nano", temperature=0)
 
 
 def create_agent(
@@ -78,7 +82,7 @@ def create_workflow() -> Callable:
     llm = create_llm()
 
     retriever_agent = create_agent(
-        llm=llm,
+        llm=create_llm("openai-nano"),
         tools=[retriever_tool],
         prompt_name="retriever_prompt",
         name="retriever_agent",
