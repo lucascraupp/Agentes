@@ -16,7 +16,7 @@ def save_results_log(results_log: list, username: str) -> str:
     filename = f"results_{username}.csv"
 
     df = pd.DataFrame(results_log)
-    df.to_csv(filename, index=False)
+    df.to_csv(filename, index=False, sep=";")
     return filename
 
 
