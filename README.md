@@ -23,24 +23,24 @@ cd Agents
 ```
 
 2. Create and activate a virtual environment:
-   1. Linux:
+- Linux:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 ```
 
-   2. Windows:
+ - Windows:
 ```bash
 python -m venv .venv
 .venv\Scripts\activate
 ```
 
-3. Install dependencies:
+1. Install dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
-4. Configure environment variables:
+1. Configure environment variables:
 ```bash
 # API Keys
 export OPENAI_API_KEY="sk-proj-..."  # Your OpenAI API key
