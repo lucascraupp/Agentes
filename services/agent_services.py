@@ -47,6 +47,11 @@ def create_agent(
 
 
 def create_supervisor_agent(llm: BaseChatModel) -> AgentExecutor:
+    assign_to_retriever_agent = create_handoff_tool(
+        agent_name="retriever_agent",
+        description="Assign task to a retriever agent for searching through documents.",
+    )
+
     assign_to_research_agent = create_handoff_tool(
         agent_name="research_agent",
         description="Assign task to a researcher agent.",
@@ -59,7 +64,11 @@ def create_supervisor_agent(llm: BaseChatModel) -> AgentExecutor:
 
     return create_agent(
         llm=llm,
-        tools=[assign_to_research_agent, assign_to_math_agent],
+        tools=[
+            assign_to_retriever_agent,
+            assign_to_research_agent,
+            assign_to_math_agent,
+        ],
         prompt_name="supervisor_prompt",
         name="supervisor",
     )
@@ -68,9 +77,16 @@ def create_supervisor_agent(llm: BaseChatModel) -> AgentExecutor:
 def create_workflow() -> Callable:
     llm = create_llm()
 
+    retriever_agent = create_agent(
+        llm=llm,
+        tools=[retriever_tool],
+        prompt_name="retriever_prompt",
+        name="retriever_agent",
+    )
+
     research_agent = create_agent(
         llm=llm,
-        tools=[retriever_tool, internet_search, wiki_search, arxiv_search],
+        tools=[internet_search, wiki_search, arxiv_search],
         prompt_name="web_research_prompt",
         name="research_agent",
     )
@@ -87,11 +103,14 @@ def create_workflow() -> Callable:
     workflow = StateGraph(MessagesState)
 
     workflow.add_node(
-        supervisor_agent, destinations=("research_agent", "math_agent", END)
+        supervisor_agent,
+        destinations=("retriever_agent", "research_agent", "math_agent", END),
     )
+    workflow.add_node(retriever_agent)
     workflow.add_node(research_agent)
     workflow.add_node(math_agent)
     workflow.add_edge(START, "supervisor")
+    workflow.add_edge("retriever_agent", "supervisor")
     workflow.add_edge("research_agent", "supervisor")
     workflow.add_edge("math_agent", "supervisor")
 
