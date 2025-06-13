@@ -14,6 +14,7 @@ supervisor_prompt: |
     - If you use abbreviations in strings, write out the full expression in parentheses the first time the word appears.
     - Write digits in full words only if asked.
     - Respond with the final answer only, no other text.
+    - When providing a list as an answer, ensure there is a space between each item for better readability.
 
 retriever_prompt: |
   You are a document retrieval expert. Your only task is to check if there's a similar question in the database.
