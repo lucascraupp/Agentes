@@ -4,7 +4,7 @@ emoji: 🕵🏻‍♂️
 colorFrom: indigo
 colorTo: indigo
 sdk: gradio
-sdk_version: 5.25.2
+sdk_version: 5.34.0
 app_file: app.py
 pinned: false
 hf_oauth: true
@@ -18,7 +18,7 @@ Check out the configuration reference at https://huggingface.co/docs/hub/spaces-
 
 1. Clone the repository:
 ```bash
-git clone https://huggingface.co/spaces/Lucas-C-R/Agents
+git clone https://github.com/lucascraupp/Agents
 cd Agents
 ```
 
